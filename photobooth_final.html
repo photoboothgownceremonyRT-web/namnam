@@ -1,0 +1,337 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+<meta charset="UTF-8">
+<title>Photo Booth</title>
+
+<style>
+body{
+    font-family: Arial, sans-serif;
+    text-align:center;
+    background:#ffffff;
+    color:#000;
+    padding:20px;
+}
+
+h1{
+    color:#000;
+}
+
+#cameraBox{
+    position:relative;
+    display:inline-block;
+}
+
+video{
+    width:400px;
+    max-width:90%;
+    border-radius:15px;
+    transform:scaleX(-1);
+    background:black;
+}
+
+button{
+    padding:12px 24px;
+    font-size:18px;
+    margin:10px;
+    border:none;
+    border-radius:12px;
+    background:#ffb6d5;
+    color:#000;
+    cursor:pointer;
+}
+
+#countdown{
+    position:absolute;
+    top:50%;
+    left:50%;
+    transform:translate(-50%,-50%);
+    font-size:90px;
+    font-weight:bold;
+    color:white;
+    text-shadow:0 0 15px black;
+    z-index:10;
+}
+
+#flash{
+    position:fixed;
+    top:0;
+    left:0;
+    width:100%;
+    height:100%;
+    background:white;
+    opacity:0;
+    pointer-events:none;
+    z-index:9999;
+}
+
+#preview{
+    margin-top:20px;
+    width:260px;
+    border-radius:15px;
+    box-shadow:0 4px 15px rgba(0,0,0,0.25);
+}
+
+canvas{
+    display:none;
+}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/gif.js/0.2.0/gif.js"></script>
+</head>
+
+<body>
+
+<div id="flash"></div>
+
+<h1>Photo Booth 📸</h1>
+
+<div id="cameraBox">
+    <video id="video" autoplay playsinline></video>
+    <div id="countdown"></div>
+</div>
+
+<br>
+
+<button onclick="startPhotobooth()">ถ่าย 3 รูป</button>
+<button onclick="downloadStrip()">ดาวน์โหลด</button>
+
+<select id="frameSelect">
+    <option value="gownframe.png">1</option>
+    <option value="gownframe2.png">2</option>
+</select>
+
+<br>
+
+<img id="preview">
+
+<canvas id="photoCanvas"></canvas>
+<canvas id="stripCanvas"></canvas>
+
+<script>
+const video = document.getElementById("video");
+const countdownEl = document.getElementById("countdown");
+const photoCanvas = document.getElementById("photoCanvas");
+const stripCanvas = document.getElementById("stripCanvas");
+const preview = document.getElementById("preview");
+
+let photos = [];
+
+navigator.mediaDevices.getUserMedia({
+    video: true,
+    audio: false
+})
+.then(function(stream){
+    video.srcObject = stream;
+})
+.catch(function(error){
+    alert("เปิดกล้องไม่ได้ กดอนุญาตกล้องก่อนนะ");
+    console.log(error);
+});
+
+async function startPhotobooth(){
+    photos = [];
+    preview.src = "";
+
+    for(let i = 0; i < 3; i++){
+        await countdown(3);
+        takePhoto();
+        await wait(700);
+    }
+
+    createStrip();
+}
+
+function countdown(seconds){
+    return new Promise(function(resolve){
+        let time = seconds;
+        countdownEl.innerText = time;
+
+        const timer = setInterval(function(){
+            time--;
+
+            if(time > 0){
+                countdownEl.innerText = time;
+            }else{
+                countdownEl.innerText = "📸";
+                clearInterval(timer);
+
+                setTimeout(function(){
+                    countdownEl.innerText = "";
+                    resolve();
+                }, 500);
+            }
+        }, 1000);
+    });
+}
+
+function takePhoto(){
+    flashEffect();
+
+    const ctx = photoCanvas.getContext("2d");
+
+    photoCanvas.width = video.videoWidth;
+    photoCanvas.height = video.videoHeight;
+
+    ctx.save();
+    ctx.translate(photoCanvas.width, 0);
+    ctx.scale(-1, 1);
+
+    ctx.drawImage(
+        video,
+        0,
+        0,
+        photoCanvas.width,
+        photoCanvas.height
+    );
+
+    ctx.restore();
+
+    photos.push(photoCanvas.toDataURL("image/png"));
+}
+
+function flashEffect(){
+    const flash = document.getElementById("flash");
+
+    flash.style.opacity = "1";
+
+    setTimeout(function(){
+        flash.style.opacity = "0";
+    }, 150);
+}
+
+function createStrip(){
+    const ctx = stripCanvas.getContext("2d");
+
+    const stripW = 720;
+    const stripH = 2160;
+
+    stripCanvas.width = stripW;
+    stripCanvas.height = stripH;
+
+    const bg = new Image();
+
+    bg.onload = function(){
+        ctx.drawImage(bg, 0, 0, stripW, stripH);
+        drawPhotos(ctx);
+    };
+
+    const selectedFrame = document.getElementById("frameSelect").value;
+    bg.src = selectedFrame;
+}
+
+async function drawPhotos(ctx){
+    const photoW = 640;
+    const photoH = 450;
+    const x = 40;
+
+    const positions = [80, 600, 1120];
+
+    for(let i = 0; i < photos.length; i++){
+        const img = new Image();
+
+        await new Promise(function(resolve){
+            img.onload = resolve;
+            img.src = photos[i];
+        });
+
+        const y = positions[i];
+
+        ctx.save();
+        roundRect(ctx, x, y, photoW, photoH, 0);
+        ctx.clip();
+
+        const scale = Math.max(photoW / img.width, photoH / img.height);
+        const newW = img.width * scale;
+        const newH = img.height * scale;
+
+        const dx = x + (photoW - newW) / 2;
+        const dy = y + (photoH - newH) / 2;
+
+        ctx.drawImage(img, dx, dy, newW, newH);
+        ctx.restore();
+    }
+
+    preview.src = stripCanvas.toDataURL("image/png");
+}
+
+function downloadStrip(){
+    if(!preview.src){
+        alert("ถ่ายรูปก่อนน้า");
+        return;
+    }
+
+    const link = document.createElement("a");
+    link.download = "photobooth.png";
+    link.href = preview.src;
+    link.click();
+}
+
+function wait(ms){
+    return new Promise(function(resolve){
+        setTimeout(resolve, ms);
+    });
+}
+
+function roundRect(ctx, x, y, w, h, r){
+    ctx.beginPath();
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + w - r, y);
+    ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+    ctx.lineTo(x + w, y + h - r);
+    ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+    ctx.lineTo(x + r, y + h);
+    ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+async function downloadVideo(){
+    if(photos.length === 0){
+        alert("ถ่ายรูปก่อนน้า");
+        return;
+    }
+
+    const canvas = document.createElement("canvas");
+    canvas.width = 640;
+    canvas.height = 450;
+    const ctx = canvas.getContext("2d");
+
+    const stream = canvas.captureStream(1);
+    const recorder = new MediaRecorder(stream, { mimeType: "video/webm" });
+
+    const chunks = [];
+
+    recorder.ondataavailable = function(e){
+        chunks.push(e.data);
+    };
+
+    recorder.onstop = function(){
+        const blob = new Blob(chunks, { type: "video/webm" });
+        const link = document.createElement("a");
+        link.download = "photobooth.webm";
+        link.href = URL.createObjectURL(blob);
+        link.click();
+    };
+
+    recorder.start();
+
+    for(let i = 0; i < photos.length; i++){
+        const img = new Image();
+        await new Promise(resolve => {
+            img.onload = resolve;
+            img.src = photos[i];
+        });
+
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+
+        await wait(800);
+    }
+
+    recorder.stop();
+}
+</script>
+
+</body>
+</html>
